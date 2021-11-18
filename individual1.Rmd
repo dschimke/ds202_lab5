@@ -1,0 +1,145 @@
+---
+title: "Lab 5"
+author: "Daniel Schimke"
+date: "11/15/2021"
+output: html_document
+---
+
+```{r}
+library(tidyverse)
+acc <- read.csv("https://raw.githubusercontent.com/xdaiISU/ds202materials/master/hwlabs/fars2017/accident.csv", stringsAsFactors = FALSE)
+str(acc)
+
+per <- read.csv("https://raw.githubusercontent.com/xdaiISU/ds202materials/master/hwlabs/fars2017/person.csv", stringsAsFactors = FALSE)
+str(per)
+```
+
+
+
+## Question 1
+
+```{r}
+perFatal <- per %>% filter(INJ_SEV == 4)
+str(perFatal)
+```
+
+The FARS manual attributes a value of 4 to be a fatal injury sustained during the crash.
+
+
+
+## Question 2
+
+```{r}
+mostDangerous <- perFatal %>% group_by(STATE) %>% summarize(make = which.max(tabulate(MAKE))) %>%
+  mutate(make_name = ifelse(make==12,"Ford","Missing")) %>%
+  mutate(make_name = ifelse(make==20,"Chevrolet",make_name)) %>% 
+  mutate(make_name = ifelse(make==49,"Toyota",make_name)) %>% 
+  mutate(make_name = ifelse(make==37,"Honda",make_name)) %>% 
+  mutate(make_name = ifelse(make==20,"Chevrolet",make_name))
+str(mostDangerous)
+```
+
+I used the make that had the most people fatally hurt for each state and then added the names based on the codes in the FARS manual.
+
+
+
+## Question 3
+
+```{r}
+states <- readxl::read_xlsx("FRPP_GLC_-_United_StatesNov42021.xlsx") %>% mutate(`State Code` = as.numeric(`State Code`)) %>% select(`State Name`,`State Code`) %>% unique()
+mostDangerous1 <- mostDangerous %>% left_join(states,by=c("STATE"="State Code")) %>% mutate(`State Name` = tolower(`State Name`))
+
+state_data <- map_data("state")
+
+combined_data <- state_data %>% left_join(mostDangerous1, by=c("region"="State Name"))
+
+ggplot(combined_data, aes(x=long,y=lat)) + geom_polygon(aes(group=group,fill=make_name)) + geom_path(aes(group=group)) + ggtitle("Most Dangerous Vehicle by State") + labs(fill="Make")
+```
+
+I defined the most dangerous make as the one that contributed to the most fatalities for each of the states. I chose to color each of the states with the make that was the most dangerous for it. I did this because there is a large number of states in the northeast of the United States and the text would be overlapping and unreadable with a label instead. Looking at the chart itself, there is not much too surprising about it. Either Chevrolet or Ford dominate most of the states. This is because these are some of the most popular makes in the United States. There were a few states in the northeast like Maryland and Connecticut that had Honda as its most dangerous vehicle as well as a few like California and New Hampshire having Toyota. I believe that this is because many people on either coast have different car preferences compared to the rest of the United States. Overall, all of the most dangerous makes are the most common cars which is what was expected originally.
+
+
+
+## Question 4
+
+```{r}
+merged <- per %>% left_join(acc, by=c("STATE","ST_CASE","COUNTY", "VE_FORMS","DAY","MONTH","HOUR","MINUTE","RUR_URB","FUNC_SYS","HARM_EV","MAN_COLL","SCH_BUS"))
+str(merged)
+```
+
+I merged based on all of the variables that were shared between the two tables. This makes it so there are no variables that are duplicated in the new table and everything is kept through the process. I used a left join with the person table because I wanted to keep each person separate to maintain all of the information for each of the people that were involved in the crash. This means that for the next question of totaling the number of accidents by day of the week and time of day, I will only use the unique case number as multiple people being involved in the same accident is not the same as multiple accidents. The question about gender will still use each individual entry because there could be people of both genders involved in the same accident. 
+
+
+
+## Question 5
+
+```{r}
+day_of_week <- merged %>% select(ST_CASE,DAY_WEEK) %>% unique() %>%
+  mutate(Day = ifelse(DAY_WEEK==1,"Sunday","Unknown")) %>%
+  mutate(Day = ifelse(DAY_WEEK==2,"Monday",Day)) %>%
+  mutate(Day = ifelse(DAY_WEEK==3,"Tuesday",Day)) %>%
+  mutate(Day = ifelse(DAY_WEEK==4,"Wednesday",Day)) %>%
+  mutate(Day = ifelse(DAY_WEEK==5,"Thursday",Day)) %>%
+  mutate(Day = ifelse(DAY_WEEK==6,"Friday",Day)) %>%
+  mutate(Day = ifelse(DAY_WEEK==7,"Saturday",Day)) %>%
+  group_by(Day) %>% summarize(num_accidents = n())
+
+day_of_week$Day <- factor(day_of_week$Day, levels = c("Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"))
+
+ggplot(day_of_week, aes(x=Day,y=num_accidents)) + geom_bar(stat="identity") + xlab("Day of the Week") + ylab("Number of Accidents") + ggtitle("Number of Accidents by Day of the Week")
+```
+
+Looking at the number of accidents for each day of the week, we can see a general trend. There are the fewest number of crashes from Monday through Wednesday, then Thursday has a few more, and the weekend has by far the most crashes. This is most likely because people are traveling more on the weekends and are spending more time in their cars. There are also many more people drinking on the weekends so many of the crashes over the weekends could be due to drunk driving and other forms of distracted driving. 
+
+
+```{r}
+hour_of_day <- merged %>% select(ST_CASE,HOUR) %>% unique() %>% group_by(HOUR) %>% summarize(num_accidents = n())
+
+hour_of_day$HOUR <- factor(hour_of_day$HOUR, levels=c(0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,99))
+
+ggplot(hour_of_day, aes(x=HOUR,y=num_accidents)) + geom_bar(stat="identity") + xlab("Hour of the Day") + ylab("Number of Accidents") + ggtitle("Number of Accidents by Time of Day")
+```
+
+As seen from this chart, we can see a trend that there are few crashes in the very early hours of the morning around 3-5 am. There is a small peak around the hours of 6-7 as many people are going to work during these hours. After that, there is a general trend where there is more and more accidents as the day goes on with the peak around 5-8 pm. This is the time that most people come home from work and going to other places so it makes sense that there is a peak around this time.
+
+
+```{r}
+gender <- merged %>% select(ST_CASE,SEX) %>% group_by(SEX) %>% summarize(num = n()) %>% 
+  mutate(sex_name = ifelse(SEX==1,"Male","Unknown")) %>%
+  mutate(sex_name = ifelse(SEX==2,"Female",sex_name)) %>%
+  mutate(sex_name = ifelse(SEX==8,"Not Reported",sex_name))
+
+ggplot(gender, aes(x=sex_name,y=num)) + geom_bar(stat="identity") + xlab("Sex") + ylab("Number of Accidents") + ggtitle("Number of Accidents by Sex")
+```
+
+This chart is very surprising to me. I was expecting the Male and Female bars to be about the same with not much of a difference between them. I was certainly not expecting the male one to be twice as high as the female one. I am not entirely sure as to what could be causing this. It could be a combination of a few factors. Men are often not as careful as women or there could be more men than women that are driving. This does help explain why insurance is often more expensive for men instead of women as they could be seen as more dangerous and risky. 
+
+
+
+## Question 6
+
+```{r}
+byCounty <- perFatal %>% group_by(COUNTY,STATE) %>% summarize(num_deaths = n())
+counties <- readxl::read_xlsx("FRPP_GLC_-_United_StatesNov42021.xlsx") %>% select(`State Name`,`State Code`,`County Code`,`County Name`) %>% mutate(`State Code` = as.numeric(`State Code`)) %>% mutate(`County Code`=as.numeric(`County Code`)) %>% unique()
+
+counties1 <- byCounty %>% left_join(counties, by=c("COUNTY"="County Code","STATE"="State Code")) %>% mutate(`State Name` = tolower(`State Name`)) %>% mutate(`County Name` = tolower(`County Name`))
+
+county_data <- map_data("county")
+
+county_combined <- county_data %>% left_join(counties1, by=c("region"="State Name","subregion"="County Name")) %>% mutate(num_deaths= ifelse(is.na(num_deaths),0,num_deaths))
+
+
+ggplot(county_combined, aes(x=long,y=lat)) + geom_polygon(aes(group=group,fill=num_deaths)) + geom_path(aes(group=group),data=state_data) + ggtitle("Number of Deaths by County") + labs(fill="Deaths") + scico::scale_fill_scico(palette="lajolla")
+```
+
+Looking at this chart, we can determine a couple of things. There is not much difference for many of the counties in the United States that have very few deaths. This means that any county that there is a visible difference is likely a large city with many deaths. A few examples like this is looking at Texas where a few of the large cities are darker as well as the majority of Florida. Another notable county is LA county. This county by far has the most deaths. LA is generally seen as a terrible city when it comes to driving and traffic so it makes sense that there are a lot of crashes and deaths. Overall, the places where there are the most deaths is generally where the most people are which makes sense as it is more likely for there to be crashes with more people.
+
+
+
+
+
+
+
+
+
+
